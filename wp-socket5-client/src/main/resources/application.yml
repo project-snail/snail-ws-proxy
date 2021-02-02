@@ -1,0 +1,9 @@
+wp:
+  socket5:
+    client:
+      server-url: ws://127.0.0.1:8080/wp
+      bind-addr: 0.0.0.0
+      bind-port: 8224
+#logging:
+#  level:
+#    com.snail.core.handler.DataHandler: trace

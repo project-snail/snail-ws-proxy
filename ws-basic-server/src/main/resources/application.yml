@@ -1,0 +1,7 @@
+wp:
+  server:
+    enable: true
+    endpoint-path: /wp
+#logging:
+#  level:
+#    com.snail.core.handler.DataHandler: trace
