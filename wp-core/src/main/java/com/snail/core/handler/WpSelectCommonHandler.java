@@ -127,7 +127,12 @@ public class WpSelectCommonHandler {
      */
     public void registerChannel(SelectableChannel selectableChannel, int ops, Object att, Consumer<SelectionKey> selectionKeyConsumer) throws IOException {
         selectableChannel.configureBlocking(false);
-        int index = indexGen.incrementAndGet() % corePoolSize;
+        int index;
+        if (corePoolSize == 1) {
+            index = 0;
+        } else {
+            index = indexGen.incrementAndGet() % corePoolSize;
+        }
         registerChannelQueueArr[index].add(new RegisterChannelInfo(selectableChannel, ops, att, selectionKeyConsumer));
 //        唤醒selector以便处理注册队列
         selectorArr[index].wakeup();
