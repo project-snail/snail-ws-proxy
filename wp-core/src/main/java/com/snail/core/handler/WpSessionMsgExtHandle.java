@@ -11,7 +11,7 @@ import java.nio.ByteBuffer;
  * @Description:
  * @date: 2021/02/03
  */
-public interface SessionMsgExtHandle {
+public interface WpSessionMsgExtHandle {
 
     void handleSessionMsg(Session session, ByteBuffer byteBuffer, DataHandler dataHandler);
 

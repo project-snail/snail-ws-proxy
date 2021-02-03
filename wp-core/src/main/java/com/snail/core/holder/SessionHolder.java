@@ -11,7 +11,6 @@ import java.io.IOException;
 import java.lang.ref.WeakReference;
 import java.net.*;
 import java.nio.channels.SelectionKey;
-import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 
 /**

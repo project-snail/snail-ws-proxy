@@ -31,7 +31,10 @@ public class DataHandler {
 
     private WpSelectCommonHandler wpSelectCommonHandler;
 
-    private final Map<Byte, SessionMsgExtHandle> sessionMsgExtHandleMap = new ConcurrentHashMap<>();
+    private static final Map<Byte, WpSessionMsgExtHandle> sessionMsgExtHandleMap = new ConcurrentHashMap<>();
+
+    //    关闭session时的回调列表
+    private static final Map<Session, Collection<Consumer<Session>>> sessionCloseConsumerMap = new ConcurrentHashMap<>();
 
     public DataHandler() throws IOException {
         this.wpSelectCommonHandler = new WpSelectCommonHandler(
@@ -53,9 +56,9 @@ public class DataHandler {
             registerSession(session, byteBuffer);
         }
 //        额外的消息处理 方便扩展
-        SessionMsgExtHandle sessionMsgExtHandle = sessionMsgExtHandleMap.get(msgType);
-        if (sessionMsgExtHandle != null) {
-            sessionMsgExtHandle.handleSessionMsg(session, byteBuffer, this);
+        WpSessionMsgExtHandle wpSessionMsgExtHandle = sessionMsgExtHandleMap.get(msgType);
+        if (wpSessionMsgExtHandle != null) {
+            wpSessionMsgExtHandle.handleSessionMsg(session, byteBuffer, this);
         }
     }
 
@@ -172,7 +175,7 @@ public class DataHandler {
         doWriteRawToSession(session, buffer);
     }
 
-    private void doWriteRawToSession(Session session, ByteBuffer buffer) {
+    public void doWriteRawToSession(Session session, ByteBuffer buffer) {
         try {
             session.getBasicRemote().sendBinary(buffer);
         } catch (IOException e) {
@@ -202,10 +205,20 @@ public class DataHandler {
     }
 
     public void closeSession(Session session) {
-        try {
-            session.close();
-        } catch (IOException ignored) {
+
+        if (session.isOpen()) {
+            try {
+                session.close();
+            } catch (IOException ignored) {
+            }
         }
+
+        // 回调关闭session
+        Collection<Consumer<Session>> consumerList = sessionCloseConsumerMap.remove(session);
+        if (consumerList != null) {
+            consumerList.forEach(sessionConsumer -> sessionConsumer.accept(session));
+        }
+
         SessionHolder sessionHolder = sessionHolderMap.remove(session);
         if (sessionHolder == null) {
             return;
@@ -238,17 +251,28 @@ public class DataHandler {
     }
 
     /**
+     * 注册关闭session时的回调
+     */
+    public void registerCloseSessionConsumer(Session session, Consumer<Session> sessionConsumer) {
+        Collection<Consumer<Session>> consumers = sessionCloseConsumerMap.computeIfAbsent(
+            session,
+            s -> new ConcurrentLinkedQueue<>()
+        );
+        consumers.add(sessionConsumer);
+    }
+
+    /**
      * 注册额外的消息处理器
      *
-     * @param sessionMsgExtHandle 消息处理器实例
+     * @param wpSessionMsgExtHandle 消息处理器实例
      */
-    public void registerSessionMsgExtHandle(SessionMsgExtHandle sessionMsgExtHandle) {
-        SessionMsgExtHandle absent = this.sessionMsgExtHandleMap.putIfAbsent(
-            sessionMsgExtHandle.handleType(),
-            sessionMsgExtHandle
+    public static void registerSessionMsgExtHandle(WpSessionMsgExtHandle wpSessionMsgExtHandle) {
+        WpSessionMsgExtHandle absent = sessionMsgExtHandleMap.putIfAbsent(
+            wpSessionMsgExtHandle.handleType(),
+            wpSessionMsgExtHandle
         );
         if (absent != null) {
-            throw new RuntimeException(String.format("此注册器类类型已包含 --> %s", this.sessionMsgExtHandleMap));
+            throw new RuntimeException(String.format("此注册器类类型已包含 --> %s", sessionMsgExtHandleMap));
         }
     }
 

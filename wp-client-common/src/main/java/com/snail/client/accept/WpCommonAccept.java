@@ -1,22 +1,12 @@
 package com.snail.client.accept;
 
-import com.snail.core.handler.DataHandler;
 import com.snail.core.handler.WpSelectCommonHandler;
-import lombok.AllArgsConstructor;
-import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.channels.*;
-import java.util.Iterator;
-import java.util.Queue;
-import java.util.Set;
-import java.util.concurrent.ConcurrentLinkedQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.function.Consumer;
 
 /**
  * @version V1.0
@@ -35,6 +25,8 @@ public class WpCommonAccept {
 
     private WpSelectCommonHandler wpSelectCommonHandler;
 
+    private SelectionKey selectionKey;
+
     public WpCommonAccept(byte[] addr, int port, WpSelectCommonHandler.SelectionKeyConsumer selectionKeyConsumer) throws IOException {
         this(InetAddress.getByAddress(addr), port, selectionKeyConsumer);
     }
@@ -43,21 +35,35 @@ public class WpCommonAccept {
         this.bindAddr = bindAddr;
         this.port = port;
         wpSelectCommonHandler = new WpSelectCommonHandler(selectionKeyConsumer);
-        startBind();
     }
 
-    private void startBind() {
+    public void startBind() {
         ServerSocketChannel socketChannel;
         try {
             socketChannel = ServerSocketChannel.open();
             socketChannel.configureBlocking(false);
             InetSocketAddress inetSocketAddress = new InetSocketAddress(bindAddr, port);
             socketChannel.bind(inetSocketAddress);
-            wpSelectCommonHandler.registerChannel(socketChannel, SelectionKey.OP_ACCEPT, this, null);
+            wpSelectCommonHandler.registerChannel(socketChannel, SelectionKey.OP_ACCEPT, this, this::setSelectionKey);
             log.trace("绑定成功 {}:{}", inetSocketAddress.getHostString(), inetSocketAddress.getPort());
         } catch (IOException e) {
             throw new RuntimeException("绑定端口失败", e);
         }
     }
 
+    public void close() {
+        if (this.selectionKey == null) {
+            return;
+        }
+        selectionKey.cancel();
+        try {
+            selectionKey.channel().close();
+        } catch (IOException e) {
+            log.warn("关闭channel异常", e);
+        }
+    }
+
+    private void setSelectionKey(SelectionKey selectionKey) {
+        this.selectionKey = selectionKey;
+    }
 }

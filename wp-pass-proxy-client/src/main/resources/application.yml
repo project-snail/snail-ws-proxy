@@ -1,0 +1,8 @@
+wp:
+  pass-proxy:
+    client:
+      local-addr: 127.0.0.1
+      local-port: 22
+      remote-bind-addr: 127.0.0.1
+      remote-bind-port: 9022
+      server-url: ws://127.0.0.1:8080/wp

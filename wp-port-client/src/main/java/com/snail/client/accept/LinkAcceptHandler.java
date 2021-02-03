@@ -42,6 +42,7 @@ public class LinkAcceptHandler {
                 portForwarding.getBindPort(),
                 selectionKey -> handlerSelect(selectionKey, portForwarding)
             );
+            wpCommonAccept.startBind();
         }
 
     }

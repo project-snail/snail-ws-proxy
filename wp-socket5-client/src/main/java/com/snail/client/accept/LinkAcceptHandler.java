@@ -49,6 +49,7 @@ public class LinkAcceptHandler {
             wpSocket5ClientProperties.getBindPort(),
             this::handlerSelect
         );
+        wpCommonAccept.startBind();
     }
 
     private void handlerSelect(SelectionKey selectionKey) throws IOException {

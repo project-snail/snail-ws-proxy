@@ -1,12 +1,12 @@
-package com.snail.config;
+package com.snail.server.config;
 
-import com.snail.core.config.SessionMsgExtHandleRegister;
+import com.snail.server.support.WpPassProxySessionMsgExtHandle;
 import org.springframework.boot.autoconfigure.AutoConfigureOrder;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
 import org.springframework.core.Ordered;
+
 
 /**
  * @version V1.0
@@ -17,12 +17,8 @@ import org.springframework.core.Ordered;
  * @date: 2021/02/02
  */
 @Configuration
-@EnableConfigurationProperties(WpServerProperties.class)
 @AutoConfigureOrder(Ordered.LOWEST_PRECEDENCE)
 @ConditionalOnProperty(value = "wp.server.enable", havingValue = "true")
-@Import({
-    WpServerEndpointRegister.class,
-    SessionMsgExtHandleRegister.class
-})
-public class WpServerAutoConfigure {
+@Import(WpPassProxySessionMsgExtHandle.class)
+public class WpPassProxyServerAutoConfigure {
 }
