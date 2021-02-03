@@ -13,10 +13,28 @@ starter和basic-server配置
 ```yaml
 wp:
   server:
-  #是否开启
+    #是否开启
     enable: true
-  #endpoint地址
+    #endpoint地址
     endpoint-path: /wp
+```
+
+```xml
+<dependency>
+  <groupId>io.github.project-snail</groupId>
+  <artifactId>wp-server-boot-starter</artifactId>
+  <version>1.0</version>
+</dependency>
+```
+
+自定义客户端基础包
+
+```xml
+<dependency>
+  <groupId>io.github.project-snail</groupId>
+  <artifactId>wp-client-common</artifactId>
+  <version>1.0</version>
+</dependency>
 ```
 
 port-client配置
@@ -28,7 +46,7 @@ wp:
       #服务端endpoint地址    
       server-url: ws://127.0.0.1:8080/wp
       port-forwarding-list:
-      #端口转发列表      
+        #端口转发列表      
         - remote-address: 127.0.0.1 #远程地址
           remote-port: 22           #远程端口
           bind-addr: 127.0.0.1      #本地绑定地址
