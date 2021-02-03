@@ -7,6 +7,8 @@ snail-ws-proxy 是一个简单的ws数据转发，使用java原生nio与spring�
 - [x] 基本服务端jar
 - [x] 端口转发客户端
 - [x] socket5客户端
+- [x] 反向代理服务端额外starter包
+- [x] 反向代理客户端
 
 starter和basic-server配置
 
@@ -35,6 +37,31 @@ wp:
   <artifactId>wp-client-common</artifactId>
   <version>1.0</version>
 </dependency>
+```
+
+pass-proxy 配置
+
+start配置
+
+```xml
+<dependencies>
+  <groupId>io.github.project-snail</groupId>
+  <artifactId>wp-pass-proxy-server-support</artifactId>
+  <version>1.0</version>
+</dependencies>
+```
+
+客户端配置
+
+```yaml
+wp:
+  pass-proxy:
+    client:
+      local-addr: 127.0.0.1              #代理地址
+      local-port: 22                     #代理端口
+      remote-bind-addr: 127.0.0.1        #服务端绑定地址
+      remote-bind-port: 9022             #服务端绑定端口
+      server-url: ws://127.0.0.1:8080/wp #服务端endpoint地址  
 ```
 
 port-client配置
