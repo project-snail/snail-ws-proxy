@@ -36,21 +36,24 @@ public class LinkAcceptHandler {
         this.wpPortClientProperties = wpPortClientProperties;
         dataHandler = new DataHandler();
         createSessionFun = WpSessionUtil.createSessionFun(dataHandler, wpPortClientProperties.getServerUrl());
-        wpCommonAccept = new WpCommonAccept(
-            InetAddress.getByName(wpPortClientProperties.getBindAddr()),
-            wpPortClientProperties.getBindPort(),
-            this::handlerSelect
-        );
+        for (WpPortClientProperties.PortForwarding portForwarding : wpPortClientProperties.getPortForwardingList()) {
+            wpCommonAccept = new WpCommonAccept(
+                InetAddress.getByName(portForwarding.getBindAddr()),
+                portForwarding.getBindPort(),
+                selectionKey -> handlerSelect(selectionKey, portForwarding)
+            );
+        }
+
     }
 
-    private void handlerSelect(SelectionKey selectionKey) throws IOException {
+    private void handlerSelect(SelectionKey selectionKey, WpPortClientProperties.PortForwarding portForwarding) throws IOException {
         ServerSocketChannel serverSocketChannel = (ServerSocketChannel) selectionKey.channel();
         Session session = createSessionFun.get();
 //                    绑定远程连接
         dataHandler.writeRemoteInfoToSessionAndRegister(
             session,
-            wpPortClientProperties.getRemoteAddress(),
-            wpPortClientProperties.getRemotePort(),
+            portForwarding.getRemoteAddress(),
+            portForwarding.getRemotePort(),
             serverSocketChannel.accept()
         );
     }
