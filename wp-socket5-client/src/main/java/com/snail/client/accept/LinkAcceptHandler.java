@@ -40,10 +40,6 @@ public class LinkAcceptHandler {
 
     private WpCommonAccept wpCommonAccept;
 
-    private ExecutorService handlerSelectExecutorService = new ThreadPoolExecutor(
-        8, 16, 30, TimeUnit.SECONDS, new ArrayBlockingQueue<>(100), new ThreadPoolExecutor.CallerRunsPolicy()
-    );
-
     public LinkAcceptHandler(WpSocket5ClientProperties wpSocket5ClientProperties) throws IOException {
         this.wpSocket5ClientProperties = wpSocket5ClientProperties;
         dataHandler = new DataHandler();
@@ -51,29 +47,24 @@ public class LinkAcceptHandler {
         wpCommonAccept = new WpCommonAccept(
             InetAddress.getByName(wpSocket5ClientProperties.getBindAddr()),
             wpSocket5ClientProperties.getBindPort(),
-            selectionKey -> handlerSelectExecutorService.submit(() -> handlerSelect(selectionKey))
+            this::handlerSelect
         );
     }
 
-    private void handlerSelect(SelectionKey selectionKey) {
+    private void handlerSelect(SelectionKey selectionKey) throws IOException {
         ServerSocketChannel serverSocketChannel = (ServerSocketChannel) selectionKey.channel();
 
         SocketChannel socketChannel;
-        try {
-            socketChannel = serverSocketChannel.accept();
-            SocketLinkInfo socketLinkInfo = handlerSocketLink(socketChannel);
-            Session session = createSessionFun.get();
+        socketChannel = serverSocketChannel.accept();
+        SocketLinkInfo socketLinkInfo = handlerSocketLink(socketChannel);
+        Session session = createSessionFun.get();
 //             绑定远程连接
-            dataHandler.writeRemoteInfoToSessionAndRegister(
-                session,
-                socketLinkInfo.getAddr(),
-                socketLinkInfo.getPort(),
-                socketChannel
-            );
-        } catch (IOException e) {
-            selectionKey.cancel();
-            log.error("消费selectionKey IO异常", e);
-        }
+        dataHandler.writeRemoteInfoToSessionAndRegister(
+            session,
+            socketLinkInfo.getAddr(),
+            socketLinkInfo.getPort(),
+            socketChannel
+        );
 
     }
 
