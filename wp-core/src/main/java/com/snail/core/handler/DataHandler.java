@@ -31,6 +31,8 @@ public class DataHandler {
 
     private WpSelectCommonHandler wpSelectCommonHandler;
 
+    private final Map<Byte, SessionMsgExtHandle> sessionMsgExtHandleMap = new ConcurrentHashMap<>();
+
     public DataHandler() throws IOException {
         this.wpSelectCommonHandler = new WpSelectCommonHandler(
             WpSelectCommonHandler.SelectionKeyConsumer.build(
@@ -49,6 +51,11 @@ public class DataHandler {
             writeToRemote(session, byteBuffer);
         } else if (msgType == 0) {
             registerSession(session, byteBuffer);
+        }
+//        额外的消息处理 方便扩展
+        SessionMsgExtHandle sessionMsgExtHandle = sessionMsgExtHandleMap.get(msgType);
+        if (sessionMsgExtHandle != null) {
+            sessionMsgExtHandle.handleSessionMsg(session, byteBuffer, this);
         }
     }
 
@@ -228,6 +235,21 @@ public class DataHandler {
      */
     public void registerChannel(SelectableChannel selectableChannel, int ops, Object att, Consumer<SelectionKey> selectionKeyConsumer) throws IOException {
         this.wpSelectCommonHandler.registerChannel(selectableChannel, ops, att, selectionKeyConsumer);
+    }
+
+    /**
+     * 注册额外的消息处理器
+     *
+     * @param sessionMsgExtHandle 消息处理器实例
+     */
+    public void registerSessionMsgExtHandle(SessionMsgExtHandle sessionMsgExtHandle) {
+        SessionMsgExtHandle absent = this.sessionMsgExtHandleMap.putIfAbsent(
+            sessionMsgExtHandle.handleType(),
+            sessionMsgExtHandle
+        );
+        if (absent != null) {
+            throw new RuntimeException(String.format("此注册器类类型已包含 --> %s", this.sessionMsgExtHandleMap));
+        }
     }
 
 }

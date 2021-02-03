@@ -40,4 +40,7 @@ public class WpServerEndpoint {
         dataHandler.closeSession(session);
     }
 
+    public static DataHandler getDataHandler() {
+        return dataHandler;
+    }
 }
