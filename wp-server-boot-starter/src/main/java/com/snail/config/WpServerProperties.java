@@ -15,6 +15,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @ConfigurationProperties(prefix = "wp.server")
 public class WpServerProperties {
 
+    private Boolean enable;
+
     private String endpointPath;
 
 }
