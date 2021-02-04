@@ -25,7 +25,7 @@ wp:
 <dependency>
   <groupId>io.github.project-snail</groupId>
   <artifactId>wp-server-boot-starter</artifactId>
-  <version>1.0</version>
+  <version>1.1</version>
 </dependency>
 ```
 
@@ -35,19 +35,19 @@ wp:
 <dependency>
   <groupId>io.github.project-snail</groupId>
   <artifactId>wp-client-common</artifactId>
-  <version>1.0</version>
+  <version>1.1</version>
 </dependency>
 ```
 
 pass-proxy 配置
 
-start配置
+starter配置
 
 ```xml
 <dependencies>
   <groupId>io.github.project-snail</groupId>
   <artifactId>wp-pass-proxy-server-support</artifactId>
-  <version>1.0</version>
+  <version>1.1</version>
 </dependencies>
 ```
 
