@@ -45,7 +45,12 @@ public class LinkAcceptHandler {
     }
 
     private void startBind() {
+        try {
+            Thread.sleep(1000);
+        } catch (InterruptedException ignored) {
+        }
         doBind();
+        log.info("开启proxy-pass 启动新session");
     }
 
     private void doBind() {
@@ -66,6 +71,9 @@ public class LinkAcceptHandler {
         } catch (IOException e) {
             throw new RuntimeException("发送初始化消息异常", e);
         }
+
+//        session关闭后重复链接
+        dataHandler.registerCloseSessionConsumer(session, closeSession -> startBind());
     }
 
     class LinkSessionMsgExtHandle implements WpSessionMsgExtHandle {
@@ -86,7 +94,7 @@ public class LinkAcceptHandler {
                 dataHandler.registerSession(linkSession, socketChannel);
                 linkSession.getBasicRemote().sendBinary(linkInfo);
             } catch (IOException e) {
-                throw new RuntimeException("session绑定本地端口异常", e);
+                throw new RuntimeException("proxy-pass: session访问本地端口异常", e);
             }
 
         }
