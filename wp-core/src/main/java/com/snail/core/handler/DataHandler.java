@@ -216,7 +216,15 @@ public class DataHandler {
         // 回调关闭session
         Collection<Consumer<Session>> consumerList = sessionCloseConsumerMap.remove(session);
         if (consumerList != null) {
-            consumerList.forEach(sessionConsumer -> sessionConsumer.accept(session));
+            consumerList.forEach(
+                sessionConsumer -> {
+                    try {
+                        sessionConsumer.accept(session);
+                    } catch (Exception e) {
+                        log.error("session关闭回调异常", e);
+                    }
+                }
+            );
         }
 
         SessionHolder sessionHolder = sessionHolderMap.remove(session);
