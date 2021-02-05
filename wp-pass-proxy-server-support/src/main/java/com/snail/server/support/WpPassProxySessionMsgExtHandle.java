@@ -12,15 +12,15 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 
 import javax.websocket.Session;
 import java.io.IOException;
+import java.lang.ref.WeakReference;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.ServerSocketChannel;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
-import java.util.Map;
-import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
+import java.util.*;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -37,7 +37,14 @@ public class WpPassProxySessionMsgExtHandle {
 
     private final Map<Session, PassProxyInfo> passProxyInfoMap = new ConcurrentHashMap<>();
 
-    private final Map<Integer, SocketChannel> socketChannelMap = new ConcurrentHashMap<>();
+    private final Map<Integer, ChannelInfo> socketChannelMap = new ConcurrentHashMap<>();
+
+    private final Set<ChannelInfo> channelClearSet = new ConcurrentSkipListSet<>(Comparator.comparing(ChannelInfo::getLinkTime));
+
+    private final ScheduledExecutorService scheduledExecutorService = new ScheduledThreadPoolExecutor(
+        1,
+        r -> new Thread("PassProxyChannelClearScheduled")
+    );
 
     private AtomicInteger indexGen = new AtomicInteger();
 
@@ -45,6 +52,8 @@ public class WpPassProxySessionMsgExtHandle {
     public WpPassProxySessionMsgExtHandle(SessionMsgExtHandleRegister sessionMsgExtHandleRegister) {
         sessionMsgExtHandleRegister.registerSessionMsgExtHandle(new AcceptSessionMsgExtHandle());
         sessionMsgExtHandleRegister.registerSessionMsgExtHandle(new LinkSessionMsgExtHandle());
+//        定时清理未连接channel
+        scheduledExecutorService.scheduleWithFixedDelay(this::clearUnLinkChannel, 5, 5, TimeUnit.SECONDS);
     }
 
     class AcceptSessionMsgExtHandle implements WpSessionMsgExtHandle {
@@ -101,7 +110,16 @@ public class WpPassProxySessionMsgExtHandle {
             }
 
             int index = indexGen.incrementAndGet();
-            socketChannelMap.put(index, socketChannel);
+
+            ChannelInfo channelInfo = ChannelInfo.builder()
+                .index(index)
+                .socketChannel(socketChannel)
+                .sessionRef(new WeakReference<>(passProxyInfo.getSession()))
+                .linkTime(System.currentTimeMillis())
+                .build();
+            socketChannelMap.put(index, channelInfo);
+            channelClearSet.add(channelInfo);
+
             DataHandler dataHandler = passProxyInfo.getDataHandler();
 
             ByteBuffer byteBuffer = ByteBuffer.allocate(1 + 4);
@@ -124,12 +142,16 @@ public class WpPassProxySessionMsgExtHandle {
         @Override
         public void handleSessionMsg(Session session, ByteBuffer byteBuffer, DataHandler dataHandler) {
             int index = byteBuffer.getInt();
-            SocketChannel selectionKey = socketChannelMap.get(index);
-            if (selectionKey == null) {
+            ChannelInfo channelInfo = socketChannelMap.remove(index);
+            if (channelInfo == null) {
                 throw new RuntimeException("该链接已不存在");
             }
+            channelClearSet.remove(channelInfo);
+            if (channelInfo.getSocketChannel() == null || !channelInfo.getSocketChannel().isOpen()) {
+                throw new RuntimeException("该链接已被关闭");
+            }
             try {
-                dataHandler.registerSession(session, selectionKey);
+                dataHandler.registerSession(session, channelInfo.getSocketChannel());
             } catch (IOException e) {
                 throw new RuntimeException("绑定链接时异常", e);
             }
@@ -150,6 +172,32 @@ public class WpPassProxySessionMsgExtHandle {
         log.trace("关闭pass-proxy {} --> {}", passProxyInfo, session.getId());
     }
 
+    /**
+     * 清理长时间未连接的channel
+     */
+    private void clearUnLinkChannel() {
+        Iterator<ChannelInfo> iterator = channelClearSet.iterator();
+        long currentTimeMillis = System.currentTimeMillis();
+        while (iterator.hasNext()) {
+            ChannelInfo channelInfo = iterator.next();
+            if (channelInfo == null) {
+                continue;
+            }
+            if (channelInfo.getLinkTime() - currentTimeMillis < 60 * 1000) {
+                break;
+            }
+            socketChannelMap.remove(channelInfo.getIndex());
+            iterator.remove();
+            if (channelInfo.getSocketChannel().isOpen()) {
+                try {
+                    channelInfo.getSocketChannel().close();
+                } catch (IOException e) {
+                    log.warn("关闭长时间未连接channel时异常", e);
+                }
+            }
+        }
+    }
+
     @Data
     @Builder
     private static class PassProxyInfo {
@@ -168,6 +216,20 @@ public class WpPassProxySessionMsgExtHandle {
         public String toString() {
             return String.format("%s:%d", localBindAddr, localBindPort);
         }
+    }
+
+    @Data
+    @Builder
+    private static class ChannelInfo {
+
+        private SocketChannel socketChannel;
+
+        private WeakReference<Session> sessionRef;
+
+        private long linkTime;
+
+        private int index;
+
     }
 
 }
