@@ -43,7 +43,7 @@ public class WpPassProxySessionMsgExtHandle {
 
     private final ScheduledExecutorService scheduledExecutorService = new ScheduledThreadPoolExecutor(
         1,
-        r -> new Thread("PassProxyChannelClearScheduled")
+        r -> new Thread(r, "PassProxyChannelClearScheduled")
     );
 
     private AtomicInteger indexGen = new AtomicInteger();

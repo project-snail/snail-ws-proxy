@@ -47,7 +47,7 @@ starter配置
 <dependencies>
   <groupId>io.github.project-snail</groupId>
   <artifactId>wp-pass-proxy-server-support</artifactId>
-  <version>1.11</version>
+  <version>1.12</version>
 </dependencies>
 ```
 
