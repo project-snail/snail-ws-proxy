@@ -4,6 +4,8 @@ import com.snail.client.accept.WpCommonAccept;
 import com.snail.core.config.SessionMsgExtHandleRegister;
 import com.snail.core.handler.DataHandler;
 import com.snail.core.handler.WpSessionMsgExtHandle;
+import io.netty.channel.Channel;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.Builder;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
@@ -15,9 +17,6 @@ import java.io.IOException;
 import java.lang.ref.WeakReference;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.ServerSocketChannel;
-import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
@@ -43,7 +42,7 @@ public class WpPassProxySessionMsgExtHandle {
 
     private final ScheduledExecutorService scheduledExecutorService = new ScheduledThreadPoolExecutor(
         1,
-        r -> new Thread(r, "PassProxyChannelClearScheduled")
+        new DefaultThreadFactory("PassProxyChannelClearScheduled")
     );
 
     private AtomicInteger indexGen = new AtomicInteger();
@@ -96,27 +95,24 @@ public class WpPassProxySessionMsgExtHandle {
             return new WpCommonAccept(
                 InetAddress.getByName(passProxyInfo.getLocalBindAddr()),
                 passProxyInfo.getLocalBindPort(),
-                selectionKey -> this.handlerAccept(passProxyInfo, selectionKey)
+                channel -> this.handlerAccept(passProxyInfo, channel),
+                passProxyInfo.getDataHandler()::doHandle
             );
         }
 
-        private void handlerAccept(PassProxyInfo passProxyInfo, SelectionKey selectionKey) {
+        private void handlerAccept(PassProxyInfo passProxyInfo, Channel channel) {
 
-            SocketChannel socketChannel = null;
-            try {
-                socketChannel = ((ServerSocketChannel) selectionKey.channel()).accept();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
+            channel.config().setAutoRead(false);
 
             int index = indexGen.incrementAndGet();
 
             ChannelInfo channelInfo = ChannelInfo.builder()
                 .index(index)
-                .socketChannel(socketChannel)
+                .channel(channel)
                 .sessionRef(new WeakReference<>(passProxyInfo.getSession()))
                 .linkTime(System.currentTimeMillis())
                 .build();
+
             socketChannelMap.put(index, channelInfo);
             channelClearSet.add(channelInfo);
 
@@ -127,7 +123,7 @@ public class WpPassProxySessionMsgExtHandle {
             byteBuffer.putInt(index);
             byteBuffer.flip();
 
-            dataHandler.doWriteRawToSession(passProxyInfo.getSession(), byteBuffer);
+            dataHandler.doWriteRawToSession(passProxyInfo.getSession(), byteBuffer, null);
         }
 
         @Override
@@ -147,14 +143,10 @@ public class WpPassProxySessionMsgExtHandle {
                 throw new RuntimeException("该链接已不存在");
             }
             channelClearSet.remove(channelInfo);
-            if (channelInfo.getSocketChannel() == null || !channelInfo.getSocketChannel().isOpen()) {
+            if (channelInfo.getChannel() == null || !channelInfo.getChannel().isOpen()) {
                 throw new RuntimeException("该链接已被关闭");
             }
-            try {
-                dataHandler.registerSession(session, channelInfo.getSocketChannel());
-            } catch (IOException e) {
-                throw new RuntimeException("绑定链接时异常", e);
-            }
+            dataHandler.registerSession(session, channelInfo.getChannel());
         }
 
         @Override
@@ -169,7 +161,7 @@ public class WpPassProxySessionMsgExtHandle {
         Optional.ofNullable(passProxyInfo)
             .map(PassProxyInfo::getWpCommonAccept)
             .ifPresent(WpCommonAccept::close);
-        log.trace("关闭pass-proxy {} --> {}", passProxyInfo, session.getId());
+        log.trace("关闭pass-proxy bindAddr:{} --> {}", passProxyInfo, session.getId());
     }
 
     /**
@@ -188,12 +180,8 @@ public class WpPassProxySessionMsgExtHandle {
             }
             socketChannelMap.remove(channelInfo.getIndex());
             iterator.remove();
-            if (channelInfo.getSocketChannel().isOpen()) {
-                try {
-                    channelInfo.getSocketChannel().close();
-                } catch (IOException e) {
-                    log.warn("关闭长时间未连接channel时异常", e);
-                }
+            if (channelInfo.getChannel().isOpen()) {
+                channelInfo.getChannel().close();
             }
         }
     }
@@ -222,7 +210,7 @@ public class WpPassProxySessionMsgExtHandle {
     @Builder
     private static class ChannelInfo {
 
-        private SocketChannel socketChannel;
+        private Channel channel;
 
         private WeakReference<Session> sessionRef;
 

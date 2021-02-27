@@ -3,6 +3,7 @@ package com.snail.client.accept;
 import com.snail.client.properties.WpPortClientProperties;
 import com.snail.core.handler.DataHandler;
 import com.snail.client.util.WpSessionUtil;
+import io.netty.channel.Channel;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
@@ -40,22 +41,23 @@ public class LinkAcceptHandler {
             wpCommonAccept = new WpCommonAccept(
                 InetAddress.getByName(portForwarding.getBindAddr()),
                 portForwarding.getBindPort(),
-                selectionKey -> handlerSelect(selectionKey, portForwarding)
+                channel -> handlerSelect(channel, portForwarding),
+                dataHandler::doHandle
             );
             wpCommonAccept.startBind();
         }
 
     }
 
-    private void handlerSelect(SelectionKey selectionKey, WpPortClientProperties.PortForwarding portForwarding) throws IOException {
-        ServerSocketChannel serverSocketChannel = (ServerSocketChannel) selectionKey.channel();
+    private void handlerSelect(Channel channel, WpPortClientProperties.PortForwarding portForwarding) {
+
         Session session = createSessionFun.get();
 //                    绑定远程连接
         dataHandler.writeRemoteInfoToSessionAndRegister(
             session,
             portForwarding.getRemoteAddress(),
             portForwarding.getRemotePort(),
-            serverSocketChannel.accept()
+            channel
         );
     }
 

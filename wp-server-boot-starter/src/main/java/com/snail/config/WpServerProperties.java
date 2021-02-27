@@ -19,4 +19,6 @@ public class WpServerProperties {
 
     private String endpointPath;
 
+    private Integer corePoolSize = Runtime.getRuntime().availableProcessors() * 2;
+
 }

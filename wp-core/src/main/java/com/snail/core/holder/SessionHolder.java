@@ -1,6 +1,9 @@
 package com.snail.core.holder;
 
 import com.snail.core.handler.DataHandler;
+import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.VoidChannelPromise;
 import lombok.AccessLevel;
 import lombok.Data;
 import lombok.Setter;
@@ -12,6 +15,9 @@ import java.lang.ref.WeakReference;
 import java.net.*;
 import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Phaser;
+import java.util.concurrent.Semaphore;
 
 /**
  * @version V1.0
@@ -35,50 +41,39 @@ public class SessionHolder {
         this.linkInfo = new LinkInfo(remoteAddr, remotePort);
     }
 
-    public SessionHolder(Session session, DataHandler dataHandler, SocketChannel socketChannel) throws IOException {
+    public SessionHolder(Session session, DataHandler dataHandler, Channel channel) {
         this.session = session;
-        this.linkInfo = new LinkInfo(socketChannel);
-        dataHandler.registerChannel(
-            socketChannel,
-            SelectionKey.OP_READ,
-            new WeakReference<>(this),
-            linkInfo::setSelectionKey
-        );
+        this.linkInfo = new LinkInfo(channel);
+        dataHandler.registerChannel(channel, this);
     }
 
-    public SocketChannel activeRemoteStream(DataHandler dataHandler) throws IOException {
+    public ChannelFuture activeRemoteStream(DataHandler dataHandler) {
         if (linkInfo.isActive()) {
-            return linkInfo.getSocketChannel();
+            return new VoidChannelPromise(linkInfo.getChannel(), false);
         }
         synchronized (this) {
+
             if (linkInfo.isActive()) {
-                return linkInfo.getSocketChannel();
+                return new VoidChannelPromise(linkInfo.getChannel(), false);
             }
-            SocketChannel socketChannel = SocketChannel.open(
-                new InetSocketAddress(
-                    linkInfo.getInetAddress().getHostAddress(),
-                    linkInfo.getRemotePort()
-                )
+
+            ChannelFuture channelFuture = dataHandler.open(
+                linkInfo.getInetSocketAddress(),
+                null
             );
-            socketChannel.setOption(StandardSocketOptions.SO_KEEPALIVE, Boolean.TRUE)
-                .setOption(StandardSocketOptions.TCP_NODELAY, Boolean.TRUE);
-            dataHandler.registerChannel(
-                socketChannel,
-                SelectionKey.OP_READ,
-                new WeakReference<>(this),
-                selectionKey -> {
-                    linkInfo.setSelectionKey(selectionKey);
-                    log.trace("建立连接 --> {}", linkInfo);
-                }
-            );
-            linkInfo.setSocketChannel(socketChannel);
-            linkInfo.setActive(true);
-            return socketChannel;
+
+            linkInfo.setChannel(channelFuture.channel());
+            dataHandler.registerChannel(channelFuture.channel(), this);
+            linkInfo.setState(LinkState.INIT);
+            log.trace("建立连接 --> {}", linkInfo);
+
+            return channelFuture;
+
         }
     }
 
-    public SocketChannel getSocketChannel() {
-        return linkInfo.getSocketChannel();
+    public Channel getChannel() {
+        return linkInfo.getChannel();
     }
 
     @Data
@@ -88,37 +83,42 @@ public class SessionHolder {
 
         private final int remotePort;
 
-        private boolean isActive = false;
+        private LinkState state = LinkState.NO_LINK;
 
-        private SocketChannel socketChannel;
+        private Channel channel;
 
-        private SelectionKey selectionKey;
+        private InetSocketAddress inetSocketAddress;
 
-        private InetAddress inetAddress;
+        private Phaser activePhaser = new Phaser(1);
 
         LinkInfo(String remoteAddr, int remotePort) {
             this.remoteAddr = remoteAddr;
             this.remotePort = remotePort;
-            try {
-                inetAddress = InetAddress.getByName(remoteAddr);
-            } catch (UnknownHostException e) {
-                throw new RuntimeException("解析远程地址异常", e);
-            }
+            inetSocketAddress = new InetSocketAddress(remoteAddr, remotePort);
         }
 
-        LinkInfo(SocketChannel socketChannel) {
-            Socket socket = socketChannel.socket();
-            inetAddress = socket.getInetAddress();
-            this.socketChannel = socketChannel;
-            this.remoteAddr = inetAddress.getHostAddress();
-            this.remotePort = socket.getPort();
-            this.isActive = true;
+        LinkInfo(Channel channel) {
+            inetSocketAddress = (InetSocketAddress) channel.remoteAddress();
+            this.channel = channel;
+            this.remoteAddr = inetSocketAddress.getHostString();
+            this.remotePort = inetSocketAddress.getPort();
+            this.state = LinkState.ACTIVE;
         }
 
         @Override
         public String toString() {
             return String.format("%s:%d", remoteAddr, remotePort);
         }
+
+        public boolean isActive() {
+            return LinkState.ACTIVE.equals(this.state);
+        }
+    }
+
+    public enum LinkState {
+        NO_LINK,
+        INIT,
+        ACTIVE
     }
 
 }

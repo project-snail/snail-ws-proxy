@@ -4,18 +4,19 @@ import com.snail.client.properties.WpPassProxyClientProperties;
 import com.snail.core.handler.DataHandler;
 import com.snail.client.util.WpSessionUtil;
 import com.snail.core.handler.WpSessionMsgExtHandle;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import javax.websocket.*;
 import java.io.IOException;
-import java.lang.ref.WeakReference;
 import java.net.InetSocketAddress;
-import java.net.StandardSocketOptions;
 import java.nio.ByteBuffer;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.SocketChannel;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.function.Supplier;
 
 /**
@@ -36,12 +37,16 @@ public class LinkAcceptHandler {
 
     private DataHandler dataHandler;
 
-    public LinkAcceptHandler(WpPassProxyClientProperties wpPassProxyClientProperties) throws IOException {
+    private Executor executor = Executors.newSingleThreadExecutor(
+        new DefaultThreadFactory("pass-proxy-bind", false)
+    );
+
+    public LinkAcceptHandler(WpPassProxyClientProperties wpPassProxyClientProperties) {
         this.wpPassProxyClientProperties = wpPassProxyClientProperties;
         dataHandler = new DataHandler();
         DataHandler.registerSessionMsgExtHandle(new LinkSessionMsgExtHandle());
         createSessionFun = WpSessionUtil.createSessionFun(dataHandler, wpPassProxyClientProperties.getServerUrl());
-        startBind();
+        executor.execute(this::startBind);
     }
 
     private void startBind() {
@@ -73,7 +78,11 @@ public class LinkAcceptHandler {
         }
 
 //        session关闭后重复链接
-        dataHandler.registerCloseSessionConsumer(session, closeSession -> startBind());
+        dataHandler.registerCloseSessionConsumer(
+            session,
+            closeSession -> executor.execute(this::startBind)
+        );
+
     }
 
     class LinkSessionMsgExtHandle implements WpSessionMsgExtHandle {
@@ -83,44 +92,41 @@ public class LinkAcceptHandler {
             int index = byteBuffer.getInt();
 
             Session linkSession = createSessionFun.get();
-            ByteBuffer linkInfo = ByteBuffer.allocate(1 + 4);
-            linkInfo.put((byte) 3);
-            linkInfo.putInt(index);
-            linkInfo.flip();
 
-            SocketChannel socketChannel;
-            try {
-                socketChannel = open();
-                dataHandler.registerSession(linkSession, socketChannel);
-                linkSession.getBasicRemote().sendBinary(linkInfo);
-            } catch (IOException e) {
-                throw new RuntimeException("proxy-pass: session访问本地端口异常", e);
-            }
-
-        }
-
-        private SocketChannel open() throws IOException {
-            SocketChannel socketChannel = SocketChannel.open(
+            ChannelFuture channelFuture = dataHandler.open(
                 new InetSocketAddress(
                     wpPassProxyClientProperties.getLocalAddr(),
                     wpPassProxyClientProperties.getLocalPort()
-                )
-            );
-            socketChannel.setOption(StandardSocketOptions.SO_KEEPALIVE, Boolean.TRUE)
-                .setOption(StandardSocketOptions.TCP_NODELAY, Boolean.TRUE);
-            dataHandler.registerChannel(
-                socketChannel,
-                SelectionKey.OP_READ,
-                new WeakReference<>(this),
+                ),
                 null
             );
-            return socketChannel;
+
+            channelFuture.channel().config().setAutoRead(false);
+
+            channelFuture.addListener(
+                (ChannelFutureListener) future -> {
+                    if (!future.isSuccess()) {
+                        return;
+                    }
+
+                    dataHandler.registerSession(linkSession, channelFuture.channel());
+
+                    ByteBuffer linkInfo = ByteBuffer.allocate(1 + 4);
+                    linkInfo.put((byte) 3);
+                    linkInfo.putInt(index);
+                    linkInfo.flip();
+
+                    dataHandler.doWriteRawToSession(linkSession, linkInfo, null);
+                }
+            );
+
         }
 
         @Override
         public byte handleType() {
             return 3;
         }
+
     }
 
 

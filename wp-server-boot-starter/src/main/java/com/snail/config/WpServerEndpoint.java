@@ -22,14 +22,6 @@ public class WpServerEndpoint {
 
     private static DataHandler dataHandler;
 
-    static {
-        try {
-            WpServerEndpoint.dataHandler = new DataHandler();
-        } catch (IOException e) {
-            throw new RuntimeException("初始化wp处理失败", e);
-        }
-    }
-
     @OnMessage
     public void onMessage(ByteBuffer message, Session session) {
         dataHandler.handleSessionMsg(session, message);
@@ -40,7 +32,18 @@ public class WpServerEndpoint {
         dataHandler.closeSession(session);
     }
 
-    public static DataHandler getDataHandler() {
-        return dataHandler;
+    public static synchronized void init() {
+        if (WpServerEndpoint.dataHandler != null) {
+            return;
+        }
+        WpServerEndpoint.dataHandler = new DataHandler();
     }
+
+    public static synchronized void init(int corePoolSize) {
+        if (WpServerEndpoint.dataHandler != null) {
+            return;
+        }
+        WpServerEndpoint.dataHandler = new DataHandler(corePoolSize);
+    }
+
 }

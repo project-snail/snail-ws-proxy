@@ -32,6 +32,7 @@ public class WpServerEndpointRegister extends WebApplicationObjectSupport implem
 
     @Override
     public void afterPropertiesSet() throws Exception {
+        WpServerEndpoint.init(wpServerProperties.getCorePoolSize());
         serverContainer.addEndpoint(
             ServerEndpointConfig.Builder.create(
                 WpServerEndpoint.class,

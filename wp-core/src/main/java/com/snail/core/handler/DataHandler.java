@@ -2,17 +2,25 @@ package com.snail.core.handler;
 
 import com.snail.core.holder.SessionHolder;
 import com.snail.core.type.MsgTypeEnums;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.*;
+import io.netty.channel.Channel;
+import io.netty.util.AttributeKey;
+import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 
+import javax.websocket.SendHandler;
 import javax.websocket.Session;
 import java.io.IOException;
 import java.lang.ref.WeakReference;
+import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
-import java.nio.channels.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 
 /**
@@ -29,6 +37,9 @@ public class DataHandler {
 
     private static final Map<Session, SessionHolder> sessionHolderMap = new ConcurrentHashMap<>();
 
+    public static final AttributeKey<WeakReference<SessionHolder>> ATTACHMENT_ATTRIBUTE_KEY =
+        AttributeKey.valueOf("attachment");
+
     private WpSelectCommonHandler wpSelectCommonHandler;
 
     private static final Map<Byte, WpSessionMsgExtHandle> sessionMsgExtHandleMap = new ConcurrentHashMap<>();
@@ -36,19 +47,40 @@ public class DataHandler {
     //    关闭session时的回调列表
     private static final Map<Session, Collection<Consumer<Session>>> sessionCloseConsumerMap = new ConcurrentHashMap<>();
 
-    public DataHandler() throws IOException {
+    private Executor sessionMsgExecutor;
+
+    public DataHandler(int corePoolSize) {
         this.wpSelectCommonHandler = new WpSelectCommonHandler(
-            WpSelectCommonHandler.SelectionKeyConsumer.build(
+            corePoolSize,
+            WpSelectCommonHandler.MsgConsumer.build(
                 this::doHandle,
-                selectionKey -> Optional.ofNullable((WeakReference<SessionHolder>) selectionKey.attachment())
+                context -> Optional.ofNullable(context.channel().attr(ATTACHMENT_ATTRIBUTE_KEY).get())
+                    .map(WeakReference::get)
+                    .map(SessionHolder::getSession)
+                    .ifPresent(this::closeSession),
+                context -> Optional.ofNullable(context.channel().attr(ATTACHMENT_ATTRIBUTE_KEY).get())
                     .map(WeakReference::get)
                     .map(SessionHolder::getSession)
                     .ifPresent(this::closeSession)
             )
         );
+        this.sessionMsgExecutor = new ThreadPoolExecutor(
+            corePoolSize, corePoolSize, 0, TimeUnit.SECONDS,
+            new ArrayBlockingQueue<>(corePoolSize * 10, true),
+            new DefaultThreadFactory("sessionMsgExecutor"),
+            new ThreadPoolExecutor.CallerRunsPolicy()
+        );
+    }
+
+    public DataHandler() {
+        this(Runtime.getRuntime().availableProcessors() * 2);
     }
 
     public void handleSessionMsg(Session session, ByteBuffer byteBuffer) {
+        sessionMsgExecutor.execute(() -> doHandleSessionMsg(session, byteBuffer));
+    }
+
+    public void doHandleSessionMsg(Session session, ByteBuffer byteBuffer) {
         byte msgType = byteBuffer.get();
         if (msgType == 1) {
             writeToRemote(session, byteBuffer);
@@ -85,14 +117,15 @@ public class DataHandler {
     /**
      * 使session与一个channel进行绑定
      *
-     * @param session       sessions
-     * @param socketChannel channel
+     * @param session sessions
+     * @param channel channel
      * @return SessionHolder
-     * @throws IOException 注册selector异常
      */
-    public SessionHolder registerSession(Session session, SocketChannel socketChannel) throws IOException {
-        SessionHolder sessionHolder = new SessionHolder(session, this, socketChannel);
-        return doRegisterSession(session, sessionHolder);
+    public SessionHolder registerSession(Session session, Channel channel) {
+        SessionHolder sessionHolder = new SessionHolder(session, this, channel);
+        doRegisterSession(session, sessionHolder);
+        channel.read();
+        return sessionHolder;
     }
 
     private SessionHolder doRegisterSession(Session session, SessionHolder sessionHolder) {
@@ -112,16 +145,16 @@ public class DataHandler {
             return;
         }
         doWriteToRemote(sessionHolder, byteBuffer);
-        log.trace("写入数据  session --> {}", sessionHolder.getLinkInfo());
+        log.trace("写入数据 session --> {}", sessionHolder.getLinkInfo());
     }
 
     /**
      * 写入信息至session端
      */
-    public void writeToSession(SessionHolder sessionHolder, ByteBuffer byteBuffer) {
+    public void writeToSession(SessionHolder sessionHolder, ByteBuffer byteBuffer, SendHandler sendHandler) {
         Session session = sessionHolder.getSession();
         log.trace("写入数据 {} --> session ", sessionHolder.getLinkInfo());
-        doWriteToSession(session, byteBuffer);
+        doWriteToSession(session, byteBuffer, sendHandler);
     }
 
     /**
@@ -130,7 +163,7 @@ public class DataHandler {
      * @param addr 远程连接地址
      * @param port 远程连接端口
      */
-    public void writeRemoteInfoToSessionAndRegister(Session session, String addr, int port, SocketChannel socketChannel) throws IOException {
+    public void writeRemoteInfoToSessionAndRegister(Session session, String addr, int port, Channel channel) {
         byte[] addrBytes = addr.getBytes(StandardCharsets.UTF_8);
         ByteBuffer buffer = ByteBuffer.allocate(1 + 4 + addrBytes.length + 4);
         buffer.put((byte) MsgTypeEnums.CONNECTION.ordinal());
@@ -139,69 +172,131 @@ public class DataHandler {
         buffer.putInt(port);
         buffer.flip();
         try {
-            session.getBasicRemote().sendBinary(buffer);
-            SessionHolder sessionHolder = registerSession(session, socketChannel);
-            log.trace(
-                "写入远程端链接数据 {} link {}:{} --> session ",
-                sessionHolder.getLinkInfo(), addr, port
+            doWriteRawToSession(
+                session,
+                buffer,
+                result -> {
+                    SessionHolder sessionHolder = registerSession(session, channel);
+                    log.trace(
+                        "写入远程端链接数据 {} link {}:{} --> session ",
+                        sessionHolder.getLinkInfo(), addr, port
+                    );
+                }
             );
-        } catch (IOException e) {
-            throw new RuntimeException("写入数据到客户端连接时失败", e);
+        } catch (Exception e) {
+            closeSession(session);
+            log.warn("写入数据到客户端连接时失败", e);
         }
     }
 
     private void doWriteToRemote(SessionHolder sessionHolder, ByteBuffer byteBuffer) {
         SessionHolder.LinkInfo linkInfo = sessionHolder.getLinkInfo();
+
         if (!linkInfo.isActive()) {
-            try {
-                sessionHolder.activeRemoteStream(this);
-            } catch (IOException e) {
-                closeSession(sessionHolder.getSession());
-                throw new RuntimeException("开启远程连接失败", e);
+            synchronized (sessionHolder) {
+                if (!linkInfo.isActive()) {
+//                半初始化状态下追加数据 通道链接操作完成后flush
+                    if (SessionHolder.LinkState.INIT.equals(linkInfo.getState())) {
+                        writeToChannel(sessionHolder.getChannel(), Channel::write, byteBuffer);
+                    }
+                    try {
+                        ChannelFuture channelFuture = sessionHolder.activeRemoteStream(this);
+                        channelFuture.addListener(
+                            (ChannelFutureListener) future -> {
+                                if (!future.isSuccess()) {
+                                    closeSession(sessionHolder.getSession());
+                                    return;
+                                }
+                                channelFuture.channel().flush();
+                                channelFuture.channel().read();
+                                linkInfo.setState(SessionHolder.LinkState.ACTIVE);
+                                log.trace("通道初始化完成 flush数据 session --> {}", sessionHolder.getLinkInfo());
+                            }
+                        );
+                        channelFuture.channel().write(Unpooled.copiedBuffer(byteBuffer));
+                        log.trace("初始化通道 首次写入数据 session --> {}", sessionHolder.getLinkInfo());
+                        return;
+                    } catch (Exception e) {
+                        closeSession(sessionHolder.getSession());
+                        throw new RuntimeException("开启远程连接失败", e);
+                    }
+                }
             }
         }
-        try {
-            sessionHolder.getSocketChannel().write(byteBuffer);
-        } catch (IOException e) {
-            throw new RuntimeException("写入数据到远程连接时失败", e);
+
+        Channel channel = sessionHolder.getChannel();
+
+        if (!channel.isOpen()) {
+            closeSession(sessionHolder.getSession());
+            return;
         }
+
+        writeToChannel(channel, Channel::writeAndFlush, byteBuffer);
+
     }
 
-    private void doWriteToSession(Session session, ByteBuffer byteBuffer) {
+    private ChannelFuture writeToChannel(Channel channel, BiFunction<Channel, ByteBuf, ChannelFuture> writeFun, ByteBuffer byteBuffer) {
+
+        ChannelFuture channelFuture = writeFun.apply(channel, Unpooled.copiedBuffer(byteBuffer));
+
+//        判断是否写 (高低水位控制)
+        if (channel.isWritable()) {
+            return channelFuture;
+        }
+
+        try {
+            channelFuture.sync();
+        } catch (InterruptedException ignored) {
+        }
+
+        return channelFuture;
+    }
+
+    private void doWriteToSession(Session session, ByteBuffer byteBuffer, SendHandler sendHandler) {
         ByteBuffer buffer = ByteBuffer.allocate(1 + byteBuffer.remaining());
         buffer.put((byte) MsgTypeEnums.SEND.ordinal());
         buffer.put(byteBuffer);
         buffer.flip();
-        doWriteRawToSession(session, buffer);
+        doWriteRawToSession(session, buffer, sendHandler);
     }
 
-    public void doWriteRawToSession(Session session, ByteBuffer buffer) {
-        try {
-            session.getBasicRemote().sendBinary(buffer);
-        } catch (IOException e) {
-            throw new RuntimeException("写入数据到客户端连接时失败", e);
+    public void doWriteRawToSession(Session session, ByteBuffer buffer, SendHandler sendHandler) {
+        if (sendHandler == null) {
+            session.getAsyncRemote().sendBinary(buffer);
+        } else {
+            session.getAsyncRemote().sendBinary(buffer, sendHandler);
         }
+//        try {
+//            session.getBasicRemote().sendBinary(buffer);
+//        } catch (IOException e) {
+//            throw new RuntimeException("写入数据到客户端连接时失败", e);
+//        }
     }
 
-    private void doHandle(SelectionKey selectionKey) throws IOException {
-        ByteBuffer byteBuffer = ByteBuffer.allocate(1024);
-        SocketChannel channel = (SocketChannel) selectionKey.channel();
-        WeakReference<SessionHolder> sessionHolderWeakReference = (WeakReference<SessionHolder>) selectionKey.attachment();
+    public void doHandle(ChannelHandlerContext context, ByteBuf msg) {
+
+        Channel channel = context.channel();
+
+        WeakReference<SessionHolder> reference = channel.attr(ATTACHMENT_ATTRIBUTE_KEY).get();
+
         SessionHolder sessionHolder;
 //        该channel对应的sessionHolder已经没了，说明该结束这个链接
-        if (sessionHolderWeakReference == null || (sessionHolder = sessionHolderWeakReference.get()) == null) {
+        if (reference == null || (sessionHolder = reference.get()) == null) {
             channel.close();
-            selectionKey.cancel();
             return;
         }
-        int read;
-        while ((read = channel.read(byteBuffer)) > 0) {
-            byteBuffer.flip();
-            writeToSession(sessionHolder, byteBuffer);
-        }
-        if (read == -1) {
+
+        if (!sessionHolder.getSession().isOpen()) {
             closeSession(sessionHolder.getSession());
+            return;
         }
+
+        writeToSession(
+            sessionHolder,
+            msg.nioBuffer(),
+            result -> channel.read()
+        );
+
     }
 
     public void closeSession(Session session) {
@@ -232,30 +327,11 @@ public class DataHandler {
             return;
         }
         log.trace(" {} -- 关闭 id: {}", sessionHolder.getLinkInfo(), session.getId());
-        SelectionKey selectionKey = sessionHolder.getLinkInfo().getSelectionKey();
-        if (selectionKey != null) {
-            selectionKey.cancel();
-        }
-        try {
-            SocketChannel socketChannel = sessionHolder.getSocketChannel();
-            if (socketChannel != null) {
-                socketChannel.close();
-            }
-        } catch (IOException ignored) {
+        Channel channel = sessionHolder.getLinkInfo().getChannel();
+        if (channel != null) {
+            channel.close();
         }
 
-    }
-
-    /**
-     * 注册SelectableChannel到selector
-     *
-     * @param selectableChannel    channel
-     * @param ops                  监听的类型
-     * @param att                  自定义属性
-     * @param selectionKeyConsumer 接受selectionKey的回到
-     */
-    public void registerChannel(SelectableChannel selectableChannel, int ops, Object att, Consumer<SelectionKey> selectionKeyConsumer) throws IOException {
-        this.wpSelectCommonHandler.registerChannel(selectableChannel, ops, att, selectionKeyConsumer);
     }
 
     /**
@@ -284,4 +360,15 @@ public class DataHandler {
         }
     }
 
+    public void registerChannel(Channel channel, SessionHolder sessionHolder) {
+        channel.attr(ATTACHMENT_ATTRIBUTE_KEY).set(new WeakReference<>(sessionHolder));
+    }
+
+    public ChannelFuture open(InetSocketAddress inetSocketAddress, Consumer<Channel> channelConsumer) {
+        ChannelFuture channelFuture = getWpSelectCommonHandler().open(inetSocketAddress);
+        if (channelConsumer != null) {
+            channelConsumer.accept(channelFuture.channel());
+        }
+        return channelFuture;
+    }
 }
