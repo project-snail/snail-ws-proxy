@@ -1,6 +1,6 @@
 ## snail-ws-proxy 
 
-snail-ws-proxy 是一个简单的ws数据转发，使用java原生nio与spring实现
+snail-ws-proxy 是一个简单的ws数据转发，使用netty与spring实现
 
 ## 功能
 - [x] 服务端starter，可以集成到项目中，调试使用
