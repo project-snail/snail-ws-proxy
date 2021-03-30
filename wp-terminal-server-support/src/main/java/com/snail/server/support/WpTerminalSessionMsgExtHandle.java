@@ -52,6 +52,9 @@ public class WpTerminalSessionMsgExtHandle {
 
     class AcceptSessionMsgExtHandle implements WpSessionMsgExtHandle {
 
+        /**
+         * 开启一个本地pty 并且读取pty中的数据至session端
+         */
         @Override
         public void handleSessionMsg(Session session, ByteBuffer byteBuffer, DataHandler dataHandler) {
             PtyProcess ptyProcess = ptyProcessMap.computeIfAbsent(
@@ -83,6 +86,7 @@ public class WpTerminalSessionMsgExtHandle {
                 WpTerminalSessionMsgExtHandle.this::closeProcess
             );
 
+//            读取数据并发送至远端
             executorService.execute(
                 () -> {
                     InputStream inputStream = ptyProcess.getInputStream();
@@ -112,6 +116,7 @@ public class WpTerminalSessionMsgExtHandle {
                 }
             );
 
+//            注册数据消费者 并写入至pty中
             OutputStream outputStream = ptyProcess.getOutputStream();
             dataHandler.registerSession(
                 session,
