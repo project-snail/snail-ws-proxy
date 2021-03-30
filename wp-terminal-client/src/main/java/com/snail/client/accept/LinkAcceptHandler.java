@@ -66,6 +66,10 @@ public class LinkAcceptHandler {
             super(new byte[0]);
         }
 
+        /**
+         * 添加数据到队列中 同时会唤醒正在等待数据的线程
+         * @param bytes 添加到队列的数据
+         */
         public void add(byte[] bytes) {
             dataList.addLast(bytes);
 //            唤醒正在等待数据的线程
@@ -95,6 +99,10 @@ public class LinkAcceptHandler {
             return read;
         }
 
+        /**
+         * 重写读取的方法，会先从buf读取 如果读取完了，回去尝试从队列poll。
+         * 如果poll失败且未完成，会进入阻塞状态
+         */
         @Override
         public synchronized int read(byte[] b, int off, int len) {
             int read = super.read(b, off, len);
@@ -133,10 +141,12 @@ public class LinkAcceptHandler {
 
         public RemotePtyProcess(Session session) {
             this.session = session;
+//            注册session数据消费者 添加到管道队列中
             dataHandler.registerSession(
                 session,
                 dataBuffer -> inputStream.add(dataBuffer.array())
             );
+//            注册session关闭事件 设置完成标识和唤醒等待队列
             dataHandler.registerCloseSessionConsumer(
                 session,
                 closeSession -> {
@@ -184,6 +194,7 @@ public class LinkAcceptHandler {
 
         @Override
         public OutputStream getOutputStream() {
+//            重写写入方法 将写入的数据发送至session端
             return new ByteArrayOutputStream(0) {
                 @Override
                 public synchronized void write(int b) {
@@ -247,6 +258,7 @@ public class LinkAcceptHandler {
             return new PtyProcessTtyConnector(new RemotePtyProcess(session), Charset.forName("UTF-8"));
         }
 
+//        设置一些样式
         protected JediTermWidget createTerminalWidget(TabbedSettingsProvider settingsProvider) {
             JediTermWidget jediTermWidget = new JediTermWidget(new SettingsProvider());
             Terminal terminal = jediTermWidget.getTerminal();
