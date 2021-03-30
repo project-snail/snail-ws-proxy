@@ -9,17 +9,12 @@
     </parent>
     <modelVersion>4.0.0</modelVersion>
 
-    <artifactId>ws-basic-server</artifactId>
+    <artifactId>wp-terminal-client</artifactId>
 
     <dependencies>
         <dependency>
             <groupId>io.github.project-snail</groupId>
-            <artifactId>wp-core</artifactId>
-            <version>${project.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>io.github.project-snail</groupId>
-            <artifactId>wp-server-boot-starter</artifactId>
+            <artifactId>wp-client-common</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>
@@ -36,14 +31,17 @@
             <artifactId>lombok</artifactId>
         </dependency>
         <dependency>
-            <groupId>io.github.project-snail</groupId>
-            <artifactId>wp-pass-proxy-server-support</artifactId>
-            <version>${project.version}</version>
+            <groupId>javax.websocket</groupId>
+            <artifactId>javax.websocket-api</artifactId>
         </dependency>
         <dependency>
-            <groupId>io.github.project-snail</groupId>
-            <artifactId>wp-terminal-server-support</artifactId>
-            <version>${project.version}</version>
+            <groupId>org.jetbrains.jediterm</groupId>
+            <artifactId>jediterm-pty</artifactId>
+            <version>2.34</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jetbrains.pty4j</groupId>
+            <artifactId>pty4j</artifactId>
         </dependency>
     </dependencies>
 

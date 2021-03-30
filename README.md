@@ -9,6 +9,8 @@ snail-ws-proxy 是一个简单的ws数据转发，使用java原生nio与spring�
 - [x] socket5客户端
 - [x] 反向代理服务端额外starter包
 - [x] 反向代理客户端
+- [x] 获取服务端本地terminal额外starter包
+- [x] 获取服务端本地terminal客户端
 
 starter和basic-server配置
 
@@ -99,4 +101,18 @@ wp:
 
 ```
 
+terminal-client配置
 
+```yaml
+wp:
+  terminal:
+    client:
+      #服务端endpoint地址   
+      server-url: ws://127.0.0.1:8080/wp
+```
+
+启动效果
+
+![sever启动](./img/Jietu20210330-122001.jpg)
+
+![客户端启动](./img/Jietu20210330-122225.jpg)

@@ -1,0 +1,7 @@
+wp:
+  terminal:
+    client:
+      server-url: ws://127.0.0.1:8080/wp
+#logging:
+#  level:
+#    com.snail.core.handler.DataHandler: trace

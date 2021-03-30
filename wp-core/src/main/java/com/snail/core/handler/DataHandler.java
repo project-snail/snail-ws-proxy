@@ -4,8 +4,10 @@ import com.snail.core.holder.SessionHolder;
 import com.snail.core.type.MsgTypeEnums;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.*;
 import io.netty.channel.Channel;
+import io.netty.channel.ChannelFuture;
+import io.netty.channel.ChannelFutureListener;
+import io.netty.channel.ChannelHandlerContext;
 import io.netty.util.AttributeKey;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.Data;
@@ -18,7 +20,9 @@ import java.lang.ref.WeakReference;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.*;
+import java.util.Collection;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.*;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
@@ -128,6 +132,19 @@ public class DataHandler {
         return sessionHolder;
     }
 
+    /**
+     * 使session与一个byteBufferConsumer进行绑定
+     *
+     * @param session            sessions
+     * @param byteBufferConsumer 自定义的数据接收器
+     * @return SessionHolder
+     */
+    public SessionHolder registerSession(Session session, Consumer<ByteBuffer> byteBufferConsumer) {
+        SessionHolder sessionHolder = new SessionHolder(session, byteBufferConsumer);
+        doRegisterSession(session, sessionHolder);
+        return sessionHolder;
+    }
+
     private SessionHolder doRegisterSession(Session session, SessionHolder sessionHolder) {
         sessionHolderMap.put(session, sessionHolder);
         log.trace("注册通道 session --> {}, id: {}", sessionHolder.getLinkInfo(), session.getId());
@@ -224,14 +241,19 @@ public class DataHandler {
             }
         }
 
-        Channel channel = sessionHolder.getChannel();
+//        使用自定义的数据消费者
+        if (linkInfo.isUserConsumer()) {
+            linkInfo.getByteBufferConsumer().accept(byteBuffer);
+        } else {
+            Channel channel = sessionHolder.getChannel();
 
-        if (!channel.isOpen()) {
-            closeSession(sessionHolder.getSession());
-            return;
+            if (!channel.isOpen()) {
+                closeSession(sessionHolder.getSession());
+                return;
+            }
+            writeToChannel(channel, Channel::writeAndFlush, byteBuffer);
         }
 
-        writeToChannel(channel, Channel::writeAndFlush, byteBuffer);
 
     }
 
@@ -252,7 +274,7 @@ public class DataHandler {
         return channelFuture;
     }
 
-    private void doWriteToSession(Session session, ByteBuffer byteBuffer, SendHandler sendHandler) {
+    public void doWriteToSession(Session session, ByteBuffer byteBuffer, SendHandler sendHandler) {
         ByteBuffer buffer = ByteBuffer.allocate(1 + byteBuffer.remaining());
         buffer.put((byte) MsgTypeEnums.SEND.ordinal());
         buffer.put(byteBuffer);

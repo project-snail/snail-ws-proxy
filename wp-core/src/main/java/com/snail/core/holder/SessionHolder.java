@@ -10,14 +10,9 @@ import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
 import javax.websocket.Session;
-import java.io.IOException;
-import java.lang.ref.WeakReference;
-import java.net.*;
-import java.nio.channels.SelectionKey;
-import java.nio.channels.SocketChannel;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Phaser;
-import java.util.concurrent.Semaphore;
+import java.net.InetSocketAddress;
+import java.nio.ByteBuffer;
+import java.util.function.Consumer;
 
 /**
  * @version V1.0
@@ -45,6 +40,11 @@ public class SessionHolder {
         this.session = session;
         this.linkInfo = new LinkInfo(channel);
         dataHandler.registerChannel(channel, this);
+    }
+
+    public SessionHolder(Session session, Consumer<ByteBuffer> byteBufferConsumer) {
+        this.session = session;
+        this.linkInfo = new LinkInfo(byteBufferConsumer);
     }
 
     public ChannelFuture activeRemoteStream(DataHandler dataHandler) {
@@ -85,11 +85,13 @@ public class SessionHolder {
 
         private LinkState state = LinkState.NO_LINK;
 
+        private boolean isUserConsumer = false;
+
         private Channel channel;
 
         private InetSocketAddress inetSocketAddress;
 
-        private Phaser activePhaser = new Phaser(1);
+        private Consumer<ByteBuffer> byteBufferConsumer;
 
         LinkInfo(String remoteAddr, int remotePort) {
             this.remoteAddr = remoteAddr;
@@ -103,6 +105,14 @@ public class SessionHolder {
             this.remoteAddr = inetSocketAddress.getHostString();
             this.remotePort = inetSocketAddress.getPort();
             this.state = LinkState.ACTIVE;
+        }
+
+        LinkInfo(Consumer<ByteBuffer> byteBufferConsumer) {
+            this.remoteAddr = null;
+            this.remotePort = 0;
+            this.state = LinkState.ACTIVE;
+            this.byteBufferConsumer = byteBufferConsumer;
+            isUserConsumer = true;
         }
 
         @Override
