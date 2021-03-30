@@ -23,9 +23,12 @@ import java.awt.*;
 import java.io.*;
 import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
+import java.util.Deque;
+import java.util.Iterator;
 import java.util.concurrent.BlockingDeque;
+import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.LinkedBlockingDeque;
-import java.util.concurrent.Semaphore;
+import java.util.concurrent.locks.LockSupport;
 import java.util.function.Supplier;
 
 /**
@@ -57,7 +60,7 @@ public class LinkAcceptHandler {
 
         private volatile boolean isDone = false;
 
-        private Semaphore semaphore = new Semaphore(0);
+        private Deque<Thread> parkThreadList = new ConcurrentLinkedDeque<>();
 
         public LinkedByteArrayInputStream() {
             super(new byte[0]);
@@ -65,7 +68,15 @@ public class LinkAcceptHandler {
 
         public void add(byte[] bytes) {
             dataList.addLast(bytes);
-            semaphore.release();
+//            唤醒正在等待数据的线程
+            if (!parkThreadList.isEmpty()) {
+                Iterator<Thread> iterator = parkThreadList.iterator();
+                while (iterator.hasNext()) {
+                    Thread thread = iterator.next();
+                    LockSupport.unpark(thread);
+                    iterator.remove();
+                }
+            }
         }
 
         @Override
@@ -75,7 +86,8 @@ public class LinkAcceptHandler {
                 return read();
             }
             if (read == -1 && !isDone) {
-                semaphore.acquireUninterruptibly();
+                parkThreadList.addLast(Thread.currentThread());
+                LockSupport.park();
                 if (!isDone) {
                     return read();
                 }
@@ -90,7 +102,8 @@ public class LinkAcceptHandler {
                 return read(b, off, len);
             }
             if (read == -1 && !isDone) {
-                semaphore.acquireUninterruptibly();
+                parkThreadList.addLast(Thread.currentThread());
+                LockSupport.park();
                 if (!isDone) {
                     return read(b, off, len);
                 }
@@ -123,6 +136,13 @@ public class LinkAcceptHandler {
             dataHandler.registerSession(
                 session,
                 dataBuffer -> inputStream.add(dataBuffer.array())
+            );
+            dataHandler.registerCloseSessionConsumer(
+                session,
+                closeSession -> {
+                    inputStream.isDone = true;
+                    inputStream.add(new byte[0]);
+                }
             );
         }
 
