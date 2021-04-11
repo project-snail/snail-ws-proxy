@@ -46,11 +46,11 @@ pass-proxy 配置
 starter配置
 
 ```xml
-<dependencies>
+<dependency>
   <groupId>io.github.project-snail</groupId>
   <artifactId>wp-pass-proxy-server-support</artifactId>
   <version>1.2</version>
-</dependencies>
+</dependency>
 ```
 
 客户端配置
